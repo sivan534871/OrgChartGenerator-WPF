@@ -1,0 +1,25 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.14.36327.8 d17.14
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "UPS-OrgChart-WPF", "UPS-OrgChart-WPF.csproj", "{5D8639AE-9998-4A33-A94C-1A8CFEEE433A}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{5D8639AE-9998-4A33-A94C-1A8CFEEE433A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{5D8639AE-9998-4A33-A94C-1A8CFEEE433A}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{5D8639AE-9998-4A33-A94C-1A8CFEEE433A}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{5D8639AE-9998-4A33-A94C-1A8CFEEE433A}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {457C26F0-CFDC-4BB5-8CCB-F75F58B93A4B}
+	EndGlobalSection
+EndGlobal
