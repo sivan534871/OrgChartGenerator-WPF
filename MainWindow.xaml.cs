@@ -3,8 +3,10 @@ using OfficeOpenXml;
 using PdfSharpCore.Drawing;
 using PdfSharpCore.Pdf;
 using System.Collections.ObjectModel;
+using System.Globalization;
 using System.IO;
 using System.Text;
+using System.Threading;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
@@ -14,6 +16,7 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Navigation;
 using System.Windows.Shapes;
+using System.Xml.Linq;
 
 namespace UPS_OrgChart_WPF
 {
@@ -22,7 +25,23 @@ namespace UPS_OrgChart_WPF
     /// </summary>
     public partial class MainWindow : Window
     {
-		private OrgChartViewModel _viewModel;
+		private List<OrgChartViewModel> _viewModel;
+		/*
+		 * A4 Shett page size is 8.2677 inch × 11.6929 inch.
+		 * Portrait height ≈ 842 px
+		 * Landscape height ≈ 595 px
+		 * DPI	-	Dots Per Inch -> For printer
+		 * DIP	-	Device Independent Pixel (1/96 inch)
+		 * WPF is resolution independent and uses DIPs for layout and rendering.
+		 * 96 DPI (WPF DIPs to px)
+		 * Portrait height ≈ 1122.52 px
+		 * Landscape height ≈ 793.70 px
+		 * 300 DPI (your export target)
+		 * Portrait height ≈ 3507.87 px
+		 * Landscape height ≈ 2480.31 px
+		 */
+		private static double _a4PageHeight = 1122;
+		private static double _a4PageHeightExcludeLegend = _a4PageHeight - 15;
 		private const string ItcPod = "";
 		public MainWindow()
         {
@@ -45,7 +64,7 @@ namespace UPS_OrgChart_WPF
 				_viewModel = await LoadOrgChartFromExcel(openFileDialog.FileName);
 				DataContext = _viewModel;
 				DrawOrgChartHorizontalLayout();
-				DrawOrgChartVerticalLayout();
+				// DrawOrgChartVerticalLayout();
 			}
 			else
 			{
@@ -53,9 +72,9 @@ namespace UPS_OrgChart_WPF
 				Application.Current.Shutdown();
 			}
 		}
-		private async Task<OrgChartViewModel> LoadOrgChartFromExcel(string filePath)
+		private async Task<List<OrgChartViewModel>> LoadOrgChartFromExcel(string filePath)
 		{
-			var viewModel = new OrgChartViewModel();
+			var viewModel = new List<OrgChartViewModel>();
 			var nodes = new List<Node>();
 
 			// Example: Excel columns - Id, Name, ParentId, BackgroundColor
@@ -80,36 +99,45 @@ namespace UPS_OrgChart_WPF
 				}
 			}
 
-			var directors = nodes.GroupBy(n => n.OnsiteDirector);
-			foreach (var subordinates in directors)
+			var offShoreAdms = nodes.GroupBy(n => n.ItcAdm);
+			foreach (var offShoreAdm in offShoreAdms)
 			{
-				var directorNode = new DirectorNode();
-				directorNode.Name = subordinates.Key;
-				directorNode.RoleTitle = "Onsite Director";
-				directorNode.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#ffdd99"));
-				
-				var managers = subordinates
-					.GroupBy(s => string.IsNullOrWhiteSpace(s.OnsiteManager) ? ItcPod : s.OnsiteManager).OrderBy(o => o.Key);
-				foreach (var managerSubordinates in managers)
+				var offShoreModel = new OrgChartViewModel();
+				offShoreModel.OffShoreAdm = offShoreAdm.Key;
+				var directors = offShoreAdm.GroupBy(n => n.OnsiteDirector);
+				foreach (var subordinates in directors)
 				{
-					var managerNode = new ManagerNode();
-					managerNode.Name = managerSubordinates.Key;
-					managerNode.RoleTitle = "Onsite ADM";
-					managerNode.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#FFF9E3"));
-					foreach (var member in managerSubordinates.OrderByDescending(o => o.PayGrade))
+					var directorNode = new DirectorNode();
+					directorNode.Name = subordinates.Key;
+					directorNode.RoleTitle = "Onsite Director";
+					directorNode.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#ffdd99"));
+
+					var managers = subordinates
+						.GroupBy(s => string.IsNullOrWhiteSpace(s.OnsiteManager) ? ItcPod : s.OnsiteManager).OrderBy(o => o.Key);
+					foreach (var managerSubordinates in managers)
 					{
-						var isOnSeat = !string.IsNullOrWhiteSpace(member.Name);
-						var memberNode = new OrgNode
-						{
-							Name = isOnSeat ? member.Name : member.Req,
-							RoleTitle = member.RoleTitle,
-							Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString(GetColourCode(isOnSeat ? member.PayGrade : GetNonSeatMemberPayGrade(member))))
-						};
-						managerNode.Employees.Add(memberNode);
+						var managerNode = new ManagerNode();
+						managerNode.Name = managerSubordinates.Key;
+						managerNode.RoleTitle = "Onsite ADM";
+						managerNode.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#FFF9E3"));
+						foreach (var member in managerSubordinates.OrderByDescending(o => o.PayGrade))
+						{							
+							var isOnSeat = string.Equals(member.Status, "On seat - Regular", StringComparison.InvariantCultureIgnoreCase);
+							var memberNode = new OrgNode
+							{
+								Name = isOnSeat ? member.Name : member.Req,
+								RoleTitle = member.RoleTitle,
+								PayGrade = member.PayGrade,
+								Status = member.Status,
+								Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString(GetColourCode(isOnSeat ? member.PayGrade : GetNonSeatMemberPayGrade(member))))
+							};
+							managerNode.Employees.Add(memberNode);
+						}
+						directorNode.Managers.Add(managerNode);
 					}
-					directorNode.Managers.Add(managerNode);
+					offShoreModel.DirectorNodes.Add(directorNode);
 				}
-				viewModel.DirectorNodes.Add(directorNode);
+				viewModel.Add(offShoreModel);
 			}
 
 			return viewModel;
@@ -117,11 +145,23 @@ namespace UPS_OrgChart_WPF
 
 		private string GetNonSeatMemberPayGrade(Node member)
 		{
-			if (member.Status.Contains("offer", StringComparison.InvariantCultureIgnoreCase))
+			if (member.Status.Equals(OrgChartViewModel.OpenHireAhead, StringComparison.InvariantCultureIgnoreCase))
+			{
+				return "HIREAHEAD-OPEN";
+			}
+			if (member.Status.Equals(OrgChartViewModel.OnSeatHireAhead, StringComparison.InvariantCultureIgnoreCase))
+			{
+				return "HIREAHEAD";
+			}
+			if (member.Status.Equals(OrgChartViewModel.OfferAccepted, StringComparison.InvariantCultureIgnoreCase))
 			{
 				return "OFFERED";
 			}
-			else if (member.Status.Contains("internview", StringComparison.InvariantCultureIgnoreCase))
+			if (member.Status.Equals(OrgChartViewModel.GD, StringComparison.InvariantCultureIgnoreCase))
+			{
+				return "GD";
+			}
+			if (member.Status.Equals(OrgChartViewModel.InterviewInProgress, StringComparison.InvariantCultureIgnoreCase))
 			{
 				return "OPEN";
 			}
@@ -135,12 +175,14 @@ namespace UPS_OrgChart_WPF
 				"1U" => "#FF69B4", // Hot Pink - #FF69B4, and Light Pink - #FFB6C1 
 				"2U" => "#FFFF00", // Yellow
 				"HIREAHEAD" => "#DDEEFF", // Light Blue
+				"HIREAHEAD-OPEN" => "#E6F2FF",
 				"OFFERED" => "#FFD700", // Gold
 				"GD" => "#B7E1A1", // Light Green
 				"OPEN" => "#A9A9A9", // Dark Gray
 				_ => "#FFFFFF"  // Default White
 			};
 		}
+		/*
 		private void DrawOrgChartVerticalLayout()
 		{
 			OrgChartVerticalCanvas.Children.Clear();
@@ -433,41 +475,196 @@ namespace UPS_OrgChart_WPF
 				}
 			}
 		}
+		*/
 		private void DrawOrgChartHorizontalLayout()
 		{
 			OrgChartCanvas.Children.Clear();
-			double startX = 30, startY = 50, nodeWidth = 150, nodeHeight = 70, hSpacing = 40, vSpacing = 30;
-			DrawDirectorNodes(_viewModel.DirectorNodes, startX, startY, nodeWidth, nodeHeight, hSpacing, vSpacing);
+			double startX = 60, startY = 50, nodeWidth = 150, nodeHeight = 70, hSpacing = 40, vSpacing = 30;
+			foreach (var offShoreAdmTeam in _viewModel)
+			{
+				DrawOrgChart(offShoreAdmTeam, startX, ref startY, nodeWidth, nodeHeight, hSpacing, vSpacing);
+				startY = GetNextPageStartY(startY);
+			}
+			
 		}
 
-		private void DrawDirectorNodes(
-			ObservableCollection<DirectorNode> nodes,
+		private void DrawOrgChart(
+			OrgChartViewModel offShoreAdmTeam,
 			double x,
-			double y,
+			ref double y,
 			double width,
 			double height,
 			double hSpacing,
 			double vSpacing)
 		{
 			double currentY = y,
-				managerNodeHeight = 20,
-				managerNodeWidth = 160,
+				managerNodeHeight = 22,
+				managerNodeWidth = 165,
+				offShoreAdmWidth = 190,
 				directorNodeHeight = 22,
 				directorNodeWidth = 200,
 				managerStartX = x + 60,
 				employeeStartX = x +260,
-				employeeNodeWidth = 160,
-				employeeNodeHeight = 28,
+				employeeNodeWidth = 162,
+				employeeNodeHeight = 32,
 				employeeSpacingX = 8,
-				employeeSpacingY = 8;
+				employeeSpacingY = 8,
+				offShoreAdmStartX = x + 550;
 			int batchSize = 6;
-			foreach (var director in nodes)
+
+
+			// Summary Node
+			var admSummaryBorder = new Border
+			{
+				Width = employeeNodeWidth,
+				Height = 90,
+				Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#ffe7b3")),
+				BorderBrush = Brushes.Black,
+				BorderThickness = new Thickness(1),
+				CornerRadius = new CornerRadius(8),
+				Child = new StackPanel
+				{
+					VerticalAlignment = VerticalAlignment.Center,
+					HorizontalAlignment = HorizontalAlignment.Center,
+					Children =
+									{
+										new TextBlock
+										{
+											Text = $"On Seat - {offShoreAdmTeam.OnSeatCount}",
+											FontWeight = FontWeights.SemiBold,
+											FontSize = 9,
+											Foreground = Brushes.Black,
+											TextAlignment = TextAlignment.Left,
+											HorizontalAlignment = HorizontalAlignment.Left
+										},
+										new TextBlock
+										{
+											Text = $"(2U - {offShoreAdmTeam.TwoUCount}, 1U - {offShoreAdmTeam.OneUCount}, 0U - {offShoreAdmTeam.ZeroUCount}, HA - {offShoreAdmTeam.HireAheadCount})",
+											FontSize = 9,
+											Foreground = Brushes.Black,
+											TextAlignment = TextAlignment.Left,
+											HorizontalAlignment = HorizontalAlignment.Left
+										},
+										new TextBlock
+										{
+											Text = $"GD - {offShoreAdmTeam.GDCount}",
+											FontWeight = FontWeights.SemiBold,
+											FontSize = 9,
+											Foreground = Brushes.Black,
+											TextAlignment = TextAlignment.Left,
+											HorizontalAlignment = HorizontalAlignment.Left
+										},
+										new TextBlock
+										{
+											Text = $"Offered - {offShoreAdmTeam.OfferedCount}",
+											FontWeight = FontWeights.SemiBold,
+											FontSize = 9,
+											Foreground = Brushes.Black,
+											TextAlignment = TextAlignment.Left,
+											HorizontalAlignment = HorizontalAlignment.Left
+										},
+										new TextBlock
+										{
+											Text = $"Open - {offShoreAdmTeam.OpenCount}",
+											FontWeight = FontWeights.SemiBold,
+											FontSize = 9,
+											Foreground = Brushes.Black,
+											TextAlignment = TextAlignment.Left,
+											HorizontalAlignment = HorizontalAlignment.Left
+										},
+										new TextBlock
+										{
+											Text = $"Total - {offShoreAdmTeam.TotalCount}",
+											FontWeight = FontWeights.SemiBold,
+											FontSize = 9,
+											Foreground = Brushes.Black,
+											TextAlignment = TextAlignment.Left,
+											HorizontalAlignment = HorizontalAlignment.Left
+										}
+									}
+				}
+			};
+			OrgChartCanvas.Children.Add(admSummaryBorder);
+			Canvas.SetLeft(admSummaryBorder, x + 1100);
+			Canvas.SetTop(admSummaryBorder, currentY);
+
+
+			// Offshore ADM node
+			var offShoreAdmBorder = new Border
+			{
+				Width = offShoreAdmWidth,
+				Height = employeeNodeHeight,
+				Background = Brushes.Yellow,
+				BorderBrush = Brushes.Black,
+				BorderThickness = new Thickness(1),
+				CornerRadius = new CornerRadius(8),
+				Child = new StackPanel
+				{
+					VerticalAlignment = VerticalAlignment.Center,
+					HorizontalAlignment = HorizontalAlignment.Center,
+					Children =
+									{
+										new TextBlock
+										{
+											Text = offShoreAdmTeam.OffShoreAdm,
+											FontWeight = FontWeights.SemiBold,
+											FontSize = 9,
+											Foreground = Brushes.Black,
+											TextAlignment = TextAlignment.Center,
+											HorizontalAlignment = HorizontalAlignment.Center
+										},
+										new TextBlock
+										{
+											Text = "ADM",
+											FontSize = 8,
+											Foreground = Brushes.Black,
+											TextAlignment = TextAlignment.Center,
+											HorizontalAlignment = HorizontalAlignment.Center
+										}
+									}
+				}
+			};
+			OrgChartCanvas.Children.Add(offShoreAdmBorder);
+			Canvas.SetLeft(offShoreAdmBorder, offShoreAdmStartX);
+			currentY += 15;
+			Canvas.SetTop(offShoreAdmBorder, currentY);
+
+			var offShoreAdmBottomMidX = offShoreAdmStartX + (offShoreAdmWidth / 2);
+			var offShoreAdmBottomMidY = currentY + employeeNodeHeight;
+			
+			// change Y to start of first director container
+			currentY += employeeNodeHeight + 50;
+
+			// Line connecting offshore adm and first director container
+			var offShoreAdmLine = new Polyline
+			{
+				Stroke = Brushes.Black,
+				StrokeThickness = 1,
+				StrokeDashArray = new DoubleCollection { 4, 2 },
+				Points = new PointCollection
+								{
+									new Point(offShoreAdmBottomMidX, offShoreAdmBottomMidY),
+									new Point(offShoreAdmBottomMidX, currentY)
+								}
+			};
+			OrgChartCanvas.Children.Add(offShoreAdmLine);
+			var firstContainerTouchPoint = offShoreAdmLine.Points[1];
+			var offShoreAdmBottomMidPoint = offShoreAdmLine.Points[0];
+			// DrawArrowHead expects (x, y) as arrow tip, (fromX, fromY) as direction
+			DrawArrowHead(firstContainerTouchPoint.X, firstContainerTouchPoint.Y, offShoreAdmBottomMidPoint.X, offShoreAdmBottomMidPoint.Y, OrgChartCanvas);
+
+			foreach (var director in offShoreAdmTeam.DirectorNodes)
 			{
 				int managerCount = director.Managers?.Count ?? 0;
 				//var employeeRowsCount = director.Managers.Sum(s => s.Employees.Count <= batchSize ? 1 : (s.Employees.Count / batchSize) + (s.Employees.Count % batchSize == 0 ? 0 : 1));
 				var employeeRowsCount = director.Managers.Sum(s => s.EmployeeRows);
 				double directorRectHeight = directorNodeHeight + employeeRowsCount * (employeeNodeHeight + employeeSpacingY) + vSpacing;
-				
+
+				if (currentY + directorRectHeight + 15 > CeilToPdfPageHeight(currentY))
+				{
+					DrawLegend(OrgChartCanvas, x, currentY);
+					currentY = GetNextPageStartY(currentY);
+				}
 				// Draw director container rectangle
 				var directorContainer = new Border
 				{
@@ -502,7 +699,7 @@ namespace UPS_OrgChart_WPF
 							{
 								Text = $"{director.Name}, {director.RoleTitle}",
 								FontWeight = FontWeights.Bold,
-								FontSize = 8,
+								FontSize = 9,
 								Foreground = Brushes.Black,
 								TextAlignment = TextAlignment.Center,
 								VerticalAlignment = VerticalAlignment.Center,
@@ -515,7 +712,6 @@ namespace UPS_OrgChart_WPF
 				Canvas.SetLeft(directorNode, x + 10);
 				Canvas.SetTop(directorNode, currentY + 10);
 
-				// Draw manager nodes vertically inside director container
 				double managerStartY = currentY + directorNodeHeight + 20;
 				foreach (var managerObj in director.Managers)
 				{
@@ -545,25 +741,25 @@ namespace UPS_OrgChart_WPF
 									VerticalAlignment = VerticalAlignment.Center,
 									HorizontalAlignment = HorizontalAlignment.Center,
 									Children =
-								{
-									new TextBlock
 									{
-										Text = member.Name,
-										FontWeight = FontWeights.SemiBold,
-										FontSize = 8,
-										Foreground = Brushes.Black,
-										TextAlignment = TextAlignment.Center,
-										HorizontalAlignment = HorizontalAlignment.Center
-									},
-									new TextBlock
-									{
-										Text = member.RoleTitle,
-										FontSize = 7,
-										Foreground = Brushes.Black,
-										TextAlignment = TextAlignment.Center,
-										HorizontalAlignment = HorizontalAlignment.Center
+										new TextBlock
+										{
+											Text = member.Name,
+											FontWeight = FontWeights.SemiBold,
+											FontSize = 9,
+											Foreground = Brushes.Black,
+											TextAlignment = TextAlignment.Center,
+											HorizontalAlignment = HorizontalAlignment.Center
+										},
+										new TextBlock
+										{
+											Text = member.RoleTitle,
+											FontSize = 8,
+											Foreground = Brushes.Black,
+											TextAlignment = TextAlignment.Center,
+											HorizontalAlignment = HorizontalAlignment.Center
+										}
 									}
-								}
 								}
 							};
 							OrgChartCanvas.Children.Add(employeeBorder);
@@ -592,7 +788,7 @@ namespace UPS_OrgChart_WPF
 									{
 										Text = $"{manager.Name}, {manager.RoleTitle}",
 										FontWeight = FontWeights.SemiBold,
-										FontSize = 8,
+										FontSize = 9,
 										Foreground = Brushes.Black,
 										TextAlignment = TextAlignment.Center,
 										VerticalAlignment = VerticalAlignment.Center,
@@ -659,6 +855,9 @@ namespace UPS_OrgChart_WPF
 				}
 				currentY += directorRectHeight + vSpacing;
 			}
+			DrawLegend(OrgChartCanvas, x, currentY);
+			y = currentY;
+			OrgChartCanvas.MinHeight = currentY + 50;
 		}
 		
 		private void DrawArrowHead(double x, double y, double fromX, double fromY, Canvas canvas)
@@ -713,32 +912,148 @@ namespace UPS_OrgChart_WPF
 			}
 		}
 
+		private static readonly (string Label, string ColorHex)[] LegendItems =
+		{
+			("2U", "#FFFF00"),
+			("1U", "#FF69B4"),
+			("0U", "#FFFFFF"),
+			("Hire Ahead", "#DDEEFF"),
+			("Offered", "#FFD700"),
+			("GD", "#B7E1A1"),
+			("Open", "#A9A9A9"),
+			("Open Hire Ahead", "#E6F2FF")
+		};
+
+		private void DrawLegend(Canvas canvas, double startX, double startY)
+		{
+			double rectWidth = 18;
+			double rectHeight = 14;
+			double gapRectToText = 6;
+			double gapBetweenItems = 18;
+			double fontSize = 13;
+			double x = startX;
+
+			foreach (var (label, colorHex) in LegendItems)
+			{
+				// colored box
+				var box = new Border
+				{
+					Width = rectWidth,
+					Height = rectHeight,
+					Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString(colorHex)),
+					BorderBrush = Brushes.Black,
+					BorderThickness = new Thickness(1),
+					CornerRadius = new CornerRadius(2)
+				};
+				canvas.Children.Add(box);
+				Canvas.SetLeft(box, x);
+				Canvas.SetTop(box, startY);
+
+				// label
+				var text = new TextBlock
+				{
+					Text = label,
+					FontSize = fontSize,
+					FontWeight = FontWeights.SemiBold,
+					Foreground = Brushes.Black
+				};
+				canvas.Children.Add(text);
+				Canvas.SetLeft(text, x + rectWidth + gapRectToText);
+				Canvas.SetTop(text, startY - 2);
+
+				// measure to advance x precisely
+				double pixelsPerDip = VisualTreeHelper.GetDpi(canvas).PixelsPerDip;
+				var ft = new FormattedText(
+					label,
+					CultureInfo.CurrentUICulture,
+					FlowDirection.LeftToRight,
+					new Typeface("Segoe UI"),
+					fontSize,
+					Brushes.Black,
+					pixelsPerDip);
+
+				x += rectWidth + gapRectToText + ft.WidthIncludingTrailingWhitespace + gapBetweenItems;
+			}
+		}
 		private void ExportCanvasToPdf(Canvas canvas, string filePath)
 		{
+			// Use canvas width for PDF page width, A4 height for page height
+			double canvasWidth = canvas.ActualWidth;
+			const double A4Height = 842; // 11.69 inch * 72
+
+			// Render the entire canvas to a high DPI bitmap/quality i.e. 300 DPI
+			double targetDpi = 300.0;
+			double dpiScale = targetDpi / 72.0; // PDF is 72 DPI
+			// Target image width and Height
+			int renderWidth = (int)(canvas.ActualWidth * targetDpi / 96.0);
+			int renderHeight = (int)(canvas.ActualHeight * targetDpi / 96.0);
+
 			var size = new Size(canvas.ActualWidth, canvas.ActualHeight);
-			var rtb = new RenderTargetBitmap((int)size.Width, (int)size.Height, 96, 96, PixelFormats.Pbgra32);
 			canvas.Measure(size);
 			canvas.Arrange(new Rect(size));
+			// Render entire canvas content as single image
+			var rtb = new RenderTargetBitmap(renderWidth, renderHeight, targetDpi, targetDpi, PixelFormats.Pbgra32);
 			rtb.Render(canvas);
 
-			// Save bitmap to PDF
-			using (var stream = new MemoryStream())
-			{
-				var encoder = new PngBitmapEncoder();
-				encoder.Frames.Add(BitmapFrame.Create(rtb));
-				encoder.Save(stream);
+			// Calculate how many vertical slices/pages are needed
+			int sliceHeightPx = (int)(A4Height * dpiScale);
+			int totalHeightPx = renderHeight;
+			int totalWidthPx = renderWidth;
+			int pageCount = (int)Math.Ceiling((double)totalHeightPx / sliceHeightPx);
 
-				var pdf = new PdfDocument();
-				var page = pdf.AddPage();
-				page.Width = size.Width;
-				page.Height = size.Height;
-				using (var gfx = XGraphics.FromPdfPage(page))
+			var pdf = new PdfDocument();
+
+			for (int pageIndex = 0; pageIndex < pageCount; pageIndex++)
+			{
+				int srcY = pageIndex * sliceHeightPx;
+				int srcHeight = Math.Min(sliceHeightPx, totalHeightPx - srcY);
+
+				// Crop the bitmap for this page
+				var croppedBitmap = new CroppedBitmap(
+					rtb,
+					new Int32Rect(
+						0,
+						srcY,
+						totalWidthPx,
+						srcHeight
+					)
+				);
+
+				using (var croppedStream = new MemoryStream())
 				{
-					var img = XImage.FromStream(() => new MemoryStream(stream.ToArray()));
-					gfx.DrawImage(img, 0, 0, size.Width, size.Height);
+					var croppedEncoder = new PngBitmapEncoder();
+					croppedEncoder.Frames.Add(BitmapFrame.Create(croppedBitmap));
+					croppedEncoder.Save(croppedStream);
+
+					var page = pdf.AddPage();
+					page.Width = canvasWidth * (targetDpi / 96.0) / dpiScale;
+					page.Height = A4Height;
+
+					using (var gfx = XGraphics.FromPdfPage(page))
+					{
+						var img = XImage.FromStream(() => new MemoryStream(croppedStream.ToArray()));
+
+						// Calculate image height in PDF points
+						double imgHeightPt = srcHeight / dpiScale;
+						double imgWidthPt = totalWidthPx / dpiScale;
+
+						// Align left
+						double drawX = 0;
+						double drawY = 0;
+
+						gfx.DrawImage(img, drawX, drawY, imgWidthPt, imgHeightPt);
+					}
 				}
-				pdf.Save(filePath);
 			}
+			pdf.Save(filePath);
+		}
+		private static int CeilToPdfPageHeight(double value)
+		{
+			return (int)(Math.Ceiling(value / _a4PageHeight) * _a4PageHeight); ;
+		}
+		private static int GetNextPageStartY(double value)
+		{
+			return CeilToPdfPageHeight(value) + 15;
 		}
 	}
 }

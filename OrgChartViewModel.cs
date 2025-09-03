@@ -10,47 +10,30 @@ namespace UPS_OrgChart_WPF
 {
 	public class OrgChartViewModel
 	{
+		public const string OnSeatRegular = "On seat - Regular";
+		public const string OpenHireAhead = "Open - Hire Ahead";
+		public const string OnSeatHireAhead = "On seat - Hire Ahead";
+		public const string OfferAccepted = "Offer Accepted";
+		public const string GD = "GD";
+		public const string InterviewInProgress = "Interview in progress";
+
+		public string OffShoreAdm { get; set; }
+
+		public IEnumerable<OrgNode> AllEmployees => DirectorNodes.SelectMany(d => d.Managers).SelectMany(m => m.Employees);
+		public int OnSeatCount => AllEmployees.Count(c => c.Status.Equals(OrgChartViewModel.OnSeatHireAhead, StringComparison.InvariantCultureIgnoreCase)
+		|| c.Status.Equals(OrgChartViewModel.OnSeatRegular, StringComparison.InvariantCultureIgnoreCase));
+		public int OpenCount => AllEmployees.Count(c => c.Status.Equals(OrgChartViewModel.InterviewInProgress, StringComparison.InvariantCultureIgnoreCase)
+		|| c.Status.Equals(OrgChartViewModel.OpenHireAhead, StringComparison.InvariantCultureIgnoreCase));
+		public int OfferedCount => AllEmployees.Count(c => c.Status.Equals(OrgChartViewModel.OfferAccepted, StringComparison.InvariantCultureIgnoreCase));
+		public int GDCount => AllEmployees.Count(c => c.Status.Equals(OrgChartViewModel.GD, StringComparison.InvariantCultureIgnoreCase));
+		public int TwoUCount => AllEmployees.Count(c => c.Status.Equals(OrgChartViewModel.OnSeatRegular, StringComparison.InvariantCultureIgnoreCase) && c.PayGrade.Equals("2U", StringComparison.InvariantCultureIgnoreCase));
+		public int  OneUCount => AllEmployees.Count(c => c.Status.Equals(OrgChartViewModel.OnSeatRegular, StringComparison.InvariantCultureIgnoreCase) && c.PayGrade.Equals("1U", StringComparison.InvariantCultureIgnoreCase));
+		public int ZeroUCount => AllEmployees.Count(c => c.Status.Equals(OrgChartViewModel.OnSeatRegular, StringComparison.InvariantCultureIgnoreCase) && c.PayGrade.Equals("0U", StringComparison.InvariantCultureIgnoreCase));
+		public int HireAheadCount => AllEmployees.Count(c => c.Status.Equals(OrgChartViewModel.OnSeatHireAhead, StringComparison.InvariantCultureIgnoreCase));
+		public int TotalCount => AllEmployees.Count();
 		public ObservableCollection<DirectorNode> DirectorNodes { get; set; } = new ObservableCollection<DirectorNode>();
 		public OrgChartViewModel()
 		{
-			/*
-			RootNodes = new ObservableCollection<OrgNode>();
-			// Example based on your diagram
-			var abc = new OrgNode { Name = "abc", Background = Brushes.LightBlue };
-			var def = new OrgNode { Name = "def", Background = Brushes.LightGreen };
-			var ghi = new OrgNode { Name = "ghi", Background = Brushes.LightYellow };
-
-			var m = new OrgNode { Name = "m" };
-			var n = new OrgNode { Name = "n" };
-			var o = new OrgNode { Name = "o" };
-			var p = new OrgNode { Name = "p" };
-			var q = new OrgNode { Name = "q" };
-			var r = new OrgNode { Name = "r" };
-
-			ghi.Children.Add(m);
-			ghi.Children.Add(n);
-			ghi.Children.Add(o);
-			ghi.Children.Add(p);
-			ghi.Children.Add(q);
-			ghi.Children.Add(r);
-
-			abc.Children.Add(def);
-			abc.Children.Add(ghi);
-
-			var jkl = new OrgNode { Name = "jkl" };
-			var s = new OrgNode { Name = "s" };
-			var t = new OrgNode { Name = "t" };
-			var u = new OrgNode { Name = "u" };
-
-			jkl.Children.Add(s);
-			jkl.Children.Add(t);
-			jkl.Children.Add(u);
-
-			def.Children.Add(jkl);
-
-			RootNodes.Add(abc);
-			//RootNodes.Add(def);
-			*/
 		}
 	}
 }

@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Configuration;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
@@ -8,11 +9,9 @@ using System.Windows.Media;
 
 namespace UPS_OrgChart_WPF
 {
-	public class OrgNode
+	public class OrgNode : Node
 	{
-		public string Name { get; set; }
 		public Brush Background { get; set; } = Brushes.White;
-		public string RoleTitle { get; set; }
 	}
 
 	public class DirectorNode : OrgNode
@@ -36,5 +35,15 @@ namespace UPS_OrgChart_WPF
 		public string PayGrade { get; set; }
 		public string Req { get; set; }
 		public string Status { get; set; }
+	}
+
+	public class GradeMapConfiguration : ConfigurationElement
+	{
+		[ConfigurationProperty("friendlyName", IsRequired = true)]
+		public string FriendlyName { get; set; }
+		[ConfigurationProperty("name", IsRequired = true)]
+		public string Name { get; set; }
+		[ConfigurationProperty("colourCode", IsRequired = true)]
+		public string ColourCode { get; set; }
 	}
 }

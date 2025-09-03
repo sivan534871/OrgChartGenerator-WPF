@@ -25,14 +25,14 @@
             Click="ExportPdfButton_Click"/>
 
         <TabControl Name="OrgChartTabControl" Margin="0,40,0,0">
-            <TabItem Header="Horizontal">
+            <TabItem Header="Horizontal" IsSelected="True">
                 <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
-                    <Canvas x:Name="OrgChartCanvas" MinHeight="2000" MinWidth="1600"/>
+                    <Canvas x:Name="OrgChartCanvas" MinWidth="1400"/>
                 </ScrollViewer>
             </TabItem>
-            <TabItem Header="Vertical">
+            <TabItem Header="Vertical" IsEnabled="False">
                 <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
-                    <Canvas x:Name="OrgChartVerticalCanvas" MinHeight="2000" MinWidth="5200"/>
+                    <Canvas x:Name="OrgChartVerticalCanvas" MinHeight="2000" MinWidth="4800"/>
                 </ScrollViewer>
             </TabItem>
         </TabControl>

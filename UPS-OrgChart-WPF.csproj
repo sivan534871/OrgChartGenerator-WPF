@@ -14,4 +14,12 @@
     <PackageReference Include="PdfSharpCore" Version="1.3.67" />
   </ItemGroup>
 
+  <ItemGroup>
+    <EditorConfigFiles Remove="C:\ProgramData\DDrive\SivanesanWork\Practice\UPS-OrgChart-WPF\.editorconfig" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="C:\ProgramData\DDrive\SivanesanWork\Practice\UPS-OrgChart-WPF\.editorconfig" />
+  </ItemGroup>
+
 </Project>
