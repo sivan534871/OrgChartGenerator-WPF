@@ -1,5 +1,7 @@
 ﻿using Microsoft.Win32;
 using OfficeOpenXml;
+using PdfSharp.Xps;
+using PdfSharp.Charting;
 using PdfSharpCore.Drawing;
 using PdfSharpCore.Pdf;
 using System.Collections.ObjectModel;
@@ -12,11 +14,16 @@ using System.Windows.Controls;
 using System.Windows.Data;
 using System.Windows.Documents;
 using System.Windows.Input;
+using System.Windows.Markup;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Navigation;
 using System.Windows.Shapes;
+using System.Windows.Xps.Packaging;
 using System.Xml.Linq;
+using Point = System.Windows.Point;
+using HorizontalAlignment = System.Windows.HorizontalAlignment;
+using VerticalAlignment = System.Windows.VerticalAlignment;
 
 namespace UPS_OrgChart_WPF
 {
@@ -40,7 +47,7 @@ namespace UPS_OrgChart_WPF
 		 * Portrait height ≈ 3507.87 px
 		 * Landscape height ≈ 2480.31 px
 		 */
-		private static double _a4PageHeight = 1122;
+		//private static double _a4PageHeight = 1122;
 		private static double _a4PageHeightExcludeLegend = _a4PageHeight - 15;
 		private const string ItcPod = "";
 		public MainWindow()
@@ -643,8 +650,8 @@ namespace UPS_OrgChart_WPF
 				StrokeDashArray = new DoubleCollection { 4, 2 },
 				Points = new PointCollection
 								{
-									new Point(offShoreAdmBottomMidX, offShoreAdmBottomMidY),
-									new Point(offShoreAdmBottomMidX, currentY)
+									new System.Windows.Point(offShoreAdmBottomMidX, offShoreAdmBottomMidY),
+									new System.Windows.Point(offShoreAdmBottomMidX, currentY)
 								}
 			};
 			OrgChartCanvas.Children.Add(offShoreAdmLine);
@@ -975,77 +982,196 @@ namespace UPS_OrgChart_WPF
 				x += rectWidth + gapRectToText + ft.WidthIncludingTrailingWhitespace + gapBetweenItems;
 			}
 		}
-		private void ExportCanvasToPdf(Canvas canvas, string filePath)
+		// Add inside the MainWindow class
+		private enum PdfOrientation
 		{
-			// Use canvas width for PDF page width, A4 height for page height
-			double canvasWidth = canvas.ActualWidth;
-			const double A4Height = 842; // 11.69 inch * 72
+			Portrait,
+			Landscape
+		}
 
-			// Render the entire canvas to a high DPI bitmap/quality i.e. 300 DPI
-			double targetDpi = 300.0;
-			double dpiScale = targetDpi / 72.0; // PDF is 72 DPI
-			// Target image width and Height
-			int renderWidth = (int)(canvas.ActualWidth * targetDpi / 96.0);
-			int renderHeight = (int)(canvas.ActualHeight * targetDpi / 96.0);
+		private enum PdfFitMode
+		{
+			None,       // No scaling, paginate as needed
+			FitWidth,   // Scale to fit width, paginate by height
+			FitHeight,  // Scale to fit height, paginate by width
+			FitPage     // Scale uniformly to fit one page (keeps aspect ratio)
+		}
 
-			var size = new Size(canvas.ActualWidth, canvas.ActualHeight);
-			canvas.Measure(size);
-			canvas.Arrange(new Rect(size));
-			// Render entire canvas content as single image
-			var rtb = new RenderTargetBitmap(renderWidth, renderHeight, targetDpi, targetDpi, PixelFormats.Pbgra32);
-			rtb.Render(canvas);
+		// Replace the existing method
+		private void ExportCanvasToPdf(
+									Canvas canvas,
+									string filePath,
+									PdfOrientation orientation = PdfOrientation.Landscape,
+									PdfFitMode fitMode = PdfFitMode.FitWidth, // default to multi-page with width-fit
+									double margin = 0)
+		{
+			if (canvas == null) return;
 
-			// Calculate how many vertical slices/pages are needed
-			int sliceHeightPx = (int)(A4Height * dpiScale);
-			int totalHeightPx = renderHeight;
-			int totalWidthPx = renderWidth;
-			int pageCount = (int)Math.Ceiling((double)totalHeightPx / sliceHeightPx);
-
-			var pdf = new PdfDocument();
-
-			for (int pageIndex = 0; pageIndex < pageCount; pageIndex++)
+			try
 			{
-				int srcY = pageIndex * sliceHeightPx;
-				int srcHeight = Math.Min(sliceHeightPx, totalHeightPx - srcY);
+				// A4 @ 96 DPI
+				double portraitW = 793;           // ~8.2677 in * 96
+				double portraitH = _a4PageHeight; // 1122
+				double pageWidth = orientation == PdfOrientation.Landscape ? portraitH : portraitW;
+				double pageHeight = orientation == PdfOrientation.Landscape ? portraitW : portraitH;
 
-				// Crop the bitmap for this page
-				var croppedBitmap = new CroppedBitmap(
-					rtb,
-					new Int32Rect(
-						0,
-						srcY,
-						totalWidthPx,
-						srcHeight
-					)
-				);
+				// Usable content area (account for margins on all sides)
+				double usableWidth = Math.Max(1, pageWidth - (2 * margin));
+				double usableHeight = Math.Max(1, pageHeight - (2 * margin));
 
-				using (var croppedStream = new MemoryStream())
+				// Canvas size (try Actual/Render first, then union of descendants as fallback)
+				double canvasWidth = canvas.ActualWidth > 0 ? canvas.ActualWidth : canvas.RenderSize.Width;
+				double canvasHeight = canvas.ActualHeight > 0 ? canvas.ActualHeight : canvas.RenderSize.Height;
+				if (double.IsNaN(canvasWidth) || canvasWidth <= 0) canvasWidth = 1200; // fallback
+				if (double.IsNaN(canvasHeight) || canvasHeight <= 0) canvasHeight = 1200; // fallback
+
+				// Try to get tighter content bounds (in case canvas size is not representative)
+				try
 				{
-					var croppedEncoder = new PngBitmapEncoder();
-					croppedEncoder.Frames.Add(BitmapFrame.Create(croppedBitmap));
-					croppedEncoder.Save(croppedStream);
-
-					var page = pdf.AddPage();
-					page.Width = canvasWidth * (targetDpi / 96.0) / dpiScale;
-					page.Height = A4Height;
-
-					using (var gfx = XGraphics.FromPdfPage(page))
+					var bounds = VisualTreeHelper.GetDescendantBounds(canvas);
+					if (!bounds.IsEmpty)
 					{
-						var img = XImage.FromStream(() => new MemoryStream(croppedStream.ToArray()));
-
-						// Calculate image height in PDF points
-						double imgHeightPt = srcHeight / dpiScale;
-						double imgWidthPt = totalWidthPx / dpiScale;
-
-						// Align left
-						double drawX = 0;
-						double drawY = 0;
-
-						gfx.DrawImage(img, drawX, drawY, imgWidthPt, imgHeightPt);
+						// Right/Bottom because Canvas children can be positioned with offsets
+						canvasWidth = Math.Max(canvasWidth, bounds.Right);
+						canvasHeight = Math.Max(canvasHeight, bounds.Bottom);
 					}
 				}
+				catch { /* ignore */ }
+
+				// Scale calculation based on fit mode
+				double scale = 1.0;
+				switch (fitMode)
+				{
+					case PdfFitMode.FitWidth:
+						// Stretch to fill page width (can scale up or down)
+						scale = usableWidth / canvasWidth;
+						break;
+					case PdfFitMode.FitHeight:
+						// Stretch to fill page height (can scale up or down)
+						scale = usableHeight / canvasHeight;
+						break;
+					case PdfFitMode.FitPage:
+						// Single page, keep aspect ratio
+						scale = Math.Min(usableWidth / canvasWidth, usableHeight / canvasHeight);
+						break;
+					case PdfFitMode.None:
+					default:
+						scale = 1.0;
+						break;
+				}
+
+				double scaledWidth = canvasWidth * scale;
+				double scaledHeight = canvasHeight * scale;
+
+				// Pagination grid (tile across both directions as needed)
+				int pagesX = 1, pagesY = 1;
+				if (fitMode == PdfFitMode.FitPage)
+				{
+					// Force single page when FitPage is selected
+					pagesX = 1;
+					pagesY = 1;
+				}
+				else if (fitMode == PdfFitMode.FitHeight)
+				{
+					// Fit to height, paginate horizontally
+					pagesX = Math.Max(1, (int)Math.Ceiling(scaledWidth / usableWidth));
+					pagesY = Math.Max(1, (int)Math.Ceiling(scaledHeight / usableHeight));
+				}
+				else
+				{
+					// None or FitWidth -> paginate vertically; if still wider than page, paginate horizontally too
+					pagesX = Math.Max(1, (int)Math.Ceiling(scaledWidth / usableWidth));
+					pagesY = Math.Max(1, (int)Math.Ceiling(scaledHeight / usableHeight));
+				}
+
+				// Build FixedDocument (keeps text as text)
+				var fixedDoc = new FixedDocument
+				{
+					DocumentPaginator = { PageSize = new Size(pageWidth, pageHeight) }
+				};
+
+				// Clone original canvas XAML once (fast to re-parse)
+				string xaml = XamlWriter.Save(canvas);
+
+				for (int py = 0; py < pagesY; py++)
+				{
+					for (int px = 0; px < pagesX; px++)
+					{
+						var fixedPage = new FixedPage
+						{
+							Width = pageWidth,
+							Height = pageHeight,
+							Background = Brushes.White
+						};
+
+						// Clone canvas for this page
+						var pageCanvas = (Canvas)XamlReader.Parse(xaml);
+						pageCanvas.SnapsToDevicePixels = true;
+						pageCanvas.LayoutTransform = new ScaleTransform(scale, scale);
+
+						// Viewport for content (accounts for margins and clipping)
+						var viewport = new Grid
+						{
+							Width = usableWidth,
+							Height = usableHeight,
+							Margin = new Thickness(margin),
+							Clip = new RectangleGeometry(new Rect(0, 0, usableWidth, usableHeight))
+						};
+
+						// Translate for pagination or centering
+						double offsetX = -px * usableWidth;
+						double offsetY = -py * usableHeight;
+
+						// If single-page along an axis and content is smaller than usable, center it
+						if (pagesX == 1 && scaledWidth < usableWidth)
+							offsetX += (usableWidth - scaledWidth) / 2.0;
+						if (pagesY == 1 && scaledHeight < usableHeight)
+							offsetY += (usableHeight - scaledHeight) / 2.0;
+
+						pageCanvas.RenderTransform = new TranslateTransform(offsetX, offsetY);
+
+						viewport.Children.Add(pageCanvas);
+
+						// Layout
+						viewport.Measure(new Size(usableWidth, usableHeight));
+						viewport.Arrange(new Rect(0, 0, usableWidth, usableHeight));
+						viewport.UpdateLayout();
+
+						FixedPage.SetLeft(viewport, 0);
+						FixedPage.SetTop(viewport, 0);
+						fixedPage.Children.Add(viewport);
+						fixedPage.Measure(new Size(pageWidth, pageHeight));
+						fixedPage.Arrange(new Rect(new Size(pageWidth, pageHeight)));
+						fixedPage.UpdateLayout();
+
+						var pageContent = new PageContent();
+						((IAddChild)pageContent).AddChild(fixedPage);
+						fixedDoc.Pages.Add(pageContent);
+					}
+				}
+
+				// Write to temporary XPS file
+				string tempXps = System.IO.Path.Combine(System.IO.Path.GetTempPath(), Guid.NewGuid().ToString("N") + ".xps");
+				try
+				{
+					using (var xps = new System.Windows.Xps.Packaging.XpsDocument(tempXps, FileAccess.ReadWrite))
+					{
+						var writer = System.Windows.Xps.Packaging.XpsDocument.CreateXpsDocumentWriter(xps);
+						writer.Write(fixedDoc);
+					}
+
+					// Convert XPS to PDF (preserves text for copy/find)
+					PdfSharp.Xps.XpsConverter.Convert(tempXps, filePath, 0);
+				}
+				finally
+				{
+					try { if (File.Exists(tempXps)) File.Delete(tempXps); } catch { /* ignore */ }
+				}
 			}
-			pdf.Save(filePath);
+			catch (Exception ex)
+			{
+				MessageBox.Show($"Failed to export PDF: {ex.Message}", "Export Error", MessageBoxButton.OK, MessageBoxImage.Error);
+			}
 		}
 		private static int CeilToPdfPageHeight(double value)
 		{
@@ -1054,6 +1180,34 @@ namespace UPS_OrgChart_WPF
 		private static int GetNextPageStartY(double value)
 		{
 			return CeilToPdfPageHeight(value) + 15;
+		}
+
+		private static double MmToDip(double mm) => mm / 25.4 * 96.0;
+		
+		private static readonly double A4PortraitWidthDip  = MmToDip(210);   // 793.700787...
+		private static readonly double A4PortraitHeightDip = MmToDip(297);   // 1122.519685...
+		
+		// If you still want a single field:
+		//private static double _a4PageHeight = A4PortraitHeightDip;
+		private static double _a4PageHeight = 1100;
+		
+		// Use this when deciding page breaks during drawing to match export:
+		private static double GetEffectivePageStepDip(double canvasWidth, double margin, PdfOrientation orientation, PdfFitMode fitMode)
+		{
+		    double pageW = orientation == PdfOrientation.Landscape ? A4PortraitHeightDip : A4PortraitWidthDip;
+		    double pageH = orientation == PdfOrientation.Landscape ? A4PortraitWidthDip  : A4PortraitHeightDip;
+		
+		    double usableWidth  = Math.Max(1, pageW - 2 * margin);
+		    double usableHeight = Math.Max(1, pageH - 2 * margin);
+		
+		    double scale = fitMode switch
+		    {
+		        PdfFitMode.FitWidth  => usableWidth / Math.Max(1, canvasWidth),
+		        PdfFitMode.FitPage   => Math.Min(usableWidth / Math.Max(1, canvasWidth), 1.0), // drawing usually assumes ≤ 1
+		        _                    => 1.0
+		    };
+		
+		    return usableHeight / scale;
 		}
 	}
 }
